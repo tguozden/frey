@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simulador Turbina Pelton</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f5f5f0; color: #1a1a1a; padding: 1.5rem; max-width: 860px; margin: 0 auto; }
+    h1 { font-size: 20px; font-weight: 500; margin-bottom: 4px; }
+    .subtitle { font-size: 13px; color: #666; margin-bottom: 1.5rem; }
+    .card { background: #fff; border: 0.5px solid rgba(0,0,0,0.12); border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+    .stitle { font-size: 11px; font-weight: 500; color: #888; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px; }
+    .row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .row label { font-size: 13px; color: #555; min-width: 210px; }
+    .row input[type=range] { flex: 1; accent-color: #1D9E75; }
+    .row .val { font-size: 13px; font-weight: 500; min-width: 110px; text-align: right; color: #1a1a1a; }
+    .metrics { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; margin-bottom: 1rem; }
+    @media (max-width: 560px) { .metrics { grid-template-columns: repeat(2, 1fr); } }
+    .metric { background: #f5f5f0; border-radius: 8px; padding: 0.85rem 1rem; }
+    .mlabel { font-size: 11px; color: #888; margin-bottom: 4px; }
+    .mval { font-size: 22px; font-weight: 500; color: #1a1a1a; }
+    .munit { font-size: 12px; color: #888; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 500; margin-top: 3px; }
+    .ok   { background: #d1fae5; color: #065f46; }
+    .warn { background: #fef3c7; color: #92400e; }
+    .bad  { background: #fee2e2; color: #991b1b; }
+    .debug { font-size: 12px; color: #555; font-family: monospace; background: #f5f5f0; border-radius: 8px; padding: 10px 14px; line-height: 2.1; white-space: pre; }
+    .tw-box { background: #f5f5f0; border-radius: 8px; padding: 0.85rem 1rem; display: flex; align-items: baseline; gap: 10px; }
+    .tw-val { font-size: 22px; font-weight: 500; color: #1a1a1a; }
+    .divider { border: none; border-top: 0.5px solid rgba(0,0,0,0.08); margin: 12px 0; }
+  </style>
+</head>
+<body>
+
+<h1>Simulador Turbina Pelton</h1>
+<p class="subtitle">Modelo hidráulico con pérdidas por roce — Darcy-Weisbach + Colebrook-White (PVC)</p>
+
+<div class="card">
+  <div class="stitle">Parámetros</div>
+  <div class="row"><label>Altura bruta H (m)</label>            <input type="range" id="H"    min="20" max="300" value="140" step="1">  <span class="val" id="Hv">140 m</span></div>
+  <div class="row"><label>Diámetro cañería (mm)</label>         <input type="range" id="Dc"   min="50" max="400" value="110" step="5">  <span class="val" id="Dcv">110 mm</span></div>
+  <div class="row"><label>Longitud cañería (m)</label>          <input type="range" id="L"    min="20" max="800" value="200" step="10"> <span class="val" id="Lv">200 m</span></div>
+  <div class="row"><label>Diámetro tobera d₀ (% de cañería)</label><input type="range" id="Dt_pct" min="1" max="50" value="13" step="1"><span class="val" id="Dtv">— mm (—%)</span></div>
+  <div class="row"><label>Eficiencia global η (%)</label>       <input type="range" id="eta"  min="30" max="95"  value="85"  step="1">  <span class="val" id="etav">85 %</span></div>
+
+  <hr class="divider">
+
+  <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+    <div class="tw-box">
+      <span class="tw-val" id="tw-val">—</span>
+      <span style="font-size:12px; color:#888;">s &nbsp;— Tiempo de arranque Tw<br>
+        <span style="font-size:11px;">= L·V<sub>cañería</sub> / (g·Hn) &nbsp;|&nbsp; <span id="tw-interp" style="font-weight:500; color:#1a1a1a;">—</span></span>
+      </span>
+    </div>
+    <div style="font-size:11px; color:#aaa; line-height:1.9;">
+      &lt; 1 s → control simple<br>
+      1–3 s → control cuidadoso<br>
+      &gt; 3 s → compensación recomendada
+    </div>
+  </div>
+</div>
+
+<div class="metrics">
+  <div class="metric"><div class="mlabel">Caudal Q @ 100%</div>     <div class="mval" id="m-q">—</div> <div class="munit">L/s</div></div>
+  <div class="metric"><div class="mlabel">V chorro @ 100%</div>     <div class="mval" id="m-vj">—</div><div class="munit">m/s</div></div>
+  <div class="metric"><div class="mlabel">Pérd. roce @ 100%</div>   <div class="mval" id="m-hf">—</div><div class="munit">m <span class="badge" id="m-bhf">—</span></div></div>
+  <div class="metric"><div class="mlabel">H neta @ 100%</div>       <div class="mval" id="m-hn">—</div><div class="munit">m</div></div>
+  <div class="metric"><div class="mlabel">P hidráulica @ 100%</div> <div class="mval" id="m-ph">—</div><div class="munit">kW</div></div>
+  <div class="metric"><div class="mlabel">P neta @ 100%</div>       <div class="mval" id="m-pn">—</div><div class="munit">kW <span class="badge" id="m-bp">—</span></div></div>
+</div>
+
+<div class="card">
+  <div class="stitle">Potencia neta vs apertura aguja</div>
+  <div style="position:relative; height:300px;">
+    <canvas id="chart" role="img" aria-label="Potencia neta vs apertura aguja (0% a 100%)"></canvas>
+  </div>
+</div>
+
+<div class="card">
+  <div class="stitle">Paso a paso @ 100% apertura</div>
+  <div class="debug" id="debug"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+const G   = 9.81;
+const RHO = 1000;
+const NU  = 1.004e-6;
+const EPS = 1.5e-6;
+const Cv  = 0.97;
+
+let ch = null;
+
+function getParams() {
+  const Dc_mm  = parseFloat(document.getElementById('Dc').value);
+  const Dt_pct = parseFloat(document.getElementById('Dt_pct').value);
+  const Dt_mm  = Dc_mm * Dt_pct / 100;
+  return {
+    H:      parseFloat(document.getElementById('H').value),
+    Dc:     Dc_mm / 1000,
+    Dc_mm,
+    L:      parseFloat(document.getElementById('L').value),
+    Dt:     Dt_mm / 1000,
+    Dt_mm,
+    Dt_pct,
+    eta:    parseFloat(document.getElementById('eta').value),
+  };
+}
+
+function hf_can(Q, Dc, L) {
+  if (Q <= 0) return 0;
+  const Ac = Math.PI * (Dc/2)**2;
+  const V  = Q / Ac;
+  const Re = V * Dc / NU;
+  let f = 0.02;
+  for (let i = 0; i < 50; i++) {
+    const fn = 1 / (-2 * Math.log10(EPS/(3.7*Dc) + 2.51/(Re*Math.sqrt(f))))**2;
+    if (Math.abs(fn - f) < 1e-10) { f = fn; break; }
+    f = fn;
+  }
+  return f * (L/Dc) * V*V / (2*G);
+}
+
+function calcQ(A_tob, Dc, L, H) {
+  if (A_tob <= 0) return 0;
+  let Q = Cv * A_tob * Math.sqrt(2*G*H);
+  for (let i = 0; i < 80; i++) {
+    const Hn = Math.max(0, H - hf_can(Q, Dc, L));
+    const Qn = Cv * A_tob * Math.sqrt(2*G*Hn);
+    if (Math.abs(Qn - Q) < 1e-10) break;
+    Q = Qn;
+  }
+  return Q;
+}
+
+function calcPoint(ap_pct, p) {
+  const A_tob  = Math.PI * (p.Dt/2)**2 * (ap_pct/100);
+  const Q      = calcQ(A_tob, p.Dc, p.L, p.H);
+  const hfl    = hf_can(Q, p.Dc, p.L);
+  const Hn     = Math.max(0, p.H - hfl);
+  const Vjet   = Cv * Math.sqrt(2*G*Hn);
+  const Ac     = Math.PI * (p.Dc/2)**2;
+  const Vcan   = Q > 0 ? Q / Ac : 0;
+  const Tw     = Hn > 0 && Vcan > 0 ? p.L * Vcan / (G * Hn) : 0;
+  const P_hid  = RHO * G * Hn * Q / 1000;
+  const P_neta = P_hid * (p.eta/100);
+  return { Q, hfl, Hn, Vjet, Vcan, Tw, P_hid, P_neta };
+}
+
+function calc() {
+  const p = getParams();
+
+  document.getElementById('Hv').textContent   = p.H + ' m';
+  document.getElementById('Dcv').textContent  = p.Dc_mm.toFixed(0) + ' mm';
+  document.getElementById('Lv').textContent   = p.L + ' m';
+  document.getElementById('Dtv').textContent  = p.Dt_mm.toFixed(1) + ' mm (' + p.Dt_pct + '%)';
+  document.getElementById('etav').textContent = p.eta + ' %';
+
+  const r      = calcPoint(100, p);
+  const pctHf  = r.hfl / p.H * 100;
+
+  document.getElementById('m-q').textContent  = (r.Q*1000).toFixed(2);
+  document.getElementById('m-vj').textContent = r.Vjet.toFixed(1);
+  document.getElementById('m-hf').textContent = r.hfl.toFixed(2);
+  document.getElementById('m-hn').textContent = r.Hn.toFixed(1);
+  document.getElementById('m-ph').textContent = r.P_hid.toFixed(2);
+  document.getElementById('m-pn').textContent = r.P_neta.toFixed(2);
+
+  const bHf = document.getElementById('m-bhf');
+  bHf.textContent = pctHf.toFixed(1) + '% H';
+  bHf.className = pctHf < 3 ? 'badge ok' : pctHf < 8 ? 'badge warn' : 'badge bad';
+
+  const bP = document.getElementById('m-bp');
+  if (r.P_neta >= 7)      { bP.textContent = 'OK';      bP.className = 'badge ok'; }
+  else if (r.P_neta >= 3) { bP.textContent = 'Parcial'; bP.className = 'badge warn'; }
+  else                    { bP.textContent = 'Bajo';    bP.className = 'badge bad'; }
+
+  document.getElementById('tw-val').textContent = r.Tw.toFixed(3);
+  const interp = r.Tw < 1 ? 'control simple' : r.Tw < 3 ? 'control cuidadoso' : 'compensación recomendada';
+  document.getElementById('tw-interp').textContent = interp;
+
+  document.getElementById('debug').textContent =
+`d₀ tobera         = ${p.Dt_pct}% × ${p.Dc_mm}mm = ${p.Dt_mm.toFixed(2)} mm
+A tobera (100%)   = π·(${(p.Dt_mm/2).toFixed(2)}mm)² = ${(Math.PI*(p.Dt/2)**2*1e6).toFixed(3)} mm²
+Q                 = ${(r.Q*1000).toFixed(4)} L/s
+V cañería         = ${r.Vcan.toFixed(4)} m/s
+hf roce           = ${r.hfl.toFixed(4)} m  (${pctHf.toFixed(2)}% de H)
+H neta            = ${r.Hn.toFixed(4)} m
+V chorro (V_jet)  = Cv·√(2gHn) = ${r.Vjet.toFixed(3)} m/s
+Tw                = L·V / (g·Hn) = ${r.Tw.toFixed(4)} s
+P hidráulica      = ρ·g·Hn·Q = ${r.P_hid.toFixed(3)} kW
+P neta            = P_hid × η = ${r.P_neta.toFixed(3)} kW`;
+
+  drawChart(p);
+}
+
+function drawChart(p) {
+  const labs  = [];
+  const pData = [];
+  for (let ap = 0; ap <= 100; ap += 10) {
+    labs.push(ap + '%');
+    pData.push(parseFloat(calcPoint(ap, p).P_neta.toFixed(3)));
+  }
+  if (ch) ch.destroy();
+  ch = new Chart(document.getElementById('chart'), {
+    type: 'line',
+    data: { labels: labs, datasets: [
+      { label: 'Potencia neta (kW)', data: pData, borderColor:'#1D9E75', borderWidth:2.5, pointRadius:4, pointBackgroundColor:'#1D9E75', fill:true, backgroundColor:'rgba(29,158,117,0.08)', tension:0 },
+      { label: '8 kW observado',     data: labs.map(()=>8), borderColor:'#aaa', borderWidth:1, borderDash:[6,3], pointRadius:0, fill:false },
+    ]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display:true, labels:{ font:{size:11}, boxWidth:12 } } },
+      scales: {
+        x: { title:{display:true, text:'Apertura aguja (%)', font:{size:11}}, ticks:{font:{size:11}, autoSkip:false, maxRotation:0}, grid:{color:'rgba(0,0,0,0.06)'} },
+        y: { title:{display:true, text:'Potencia neta (kW)', font:{size:11}}, min:0, ticks:{font:{size:11}}, grid:{color:'rgba(0,0,0,0.06)'} }
+      }
+    }
+  });
+}
+
+['H','Dc','L','Dt_pct','eta'].forEach(id =>
+  document.getElementById(id).addEventListener('input', calc)
+);
+calc();
+</script>
+</body>
+</html>
